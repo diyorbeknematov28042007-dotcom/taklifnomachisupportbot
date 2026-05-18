@@ -1,0 +1,6 @@
+BOT_TOKEN=your_token_from_botfather
+ADMIN_IDS=123456789
+DATABASE_URL=postgresql://user:pass@host/db?sslmode=require
+SITE_URL=https://www.taklifnomachi.online
+PAYMENT_GROUP_ID=-1001234567890
+WEBHOOK_SECRET=your_secret_here
