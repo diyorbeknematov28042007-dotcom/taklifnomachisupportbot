@@ -217,7 +217,7 @@ async def my_profile(message: Message):
         f"📛 Ism: {user['first_name'] or '—'}\n"
         f"🆔 Username: @{user['username'] or '—'}\n"
         f"🔑 Shaxsiy kod: <code>{user['payment_code']}</code>\n"
-        f"🌐 Sayt login: {user['site_login'] or 'Ro\\'yxatdan o\\'tilmagan'}\n\n"
+        f"""🌐 Sayt login: {user['site_login'] or "Ro'yxatdan o'tilmagan"}\n\n"""
         f"📊 <b>To'lovlar statistikasi:</b>\n"
         f"  💳 Jami: {total}\n"
         f"  ✅ Tasdiqlangan: {confirmed}\n"
