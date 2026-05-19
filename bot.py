@@ -165,7 +165,7 @@ async def process_code(message: Message, state: FSMContext):
     if pay['status'] == 'paid':
         await message.answer(
             f"✅ Bu to'lov allaqachon tasdiqlangan!\n\n"
-            f"🔗 Linkingiz: {pay.get('link', 'Saytda ko\\'ring')}\n\n"
+            f"🔗 Linkingiz: {pay.get('link', 'Saytda koring')}\n\n"
             f"Saytda profilingizni oching 👇",
             parse_mode="HTML", reply_markup=site_btn()
         )
