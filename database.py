@@ -20,33 +20,26 @@ async def init_db():
                 username VARCHAR(255),
                 first_name VARCHAR(255),
                 payment_code VARCHAR(6) UNIQUE,
-                site_login VARCHAR(100),
-                site_user_id INT,
                 language VARCHAR(5) DEFAULT 'uz',
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
         await conn.execute("""
-            CREATE TABLE IF NOT EXISTS bot_payments (
+            CREATE TABLE IF NOT EXISTS bot_payment_logs (
                 id SERIAL PRIMARY KEY,
                 telegram_id BIGINT NOT NULL,
-                payment_code VARCHAR(6),
-                amount BIGINT,
+                code VARCHAR(10),
+                amount BIGINT DEFAULT 0,
                 screenshot_file_id TEXT,
-                status VARCHAR(20) DEFAULT 'pending',
-                admin_id BIGINT,
-                created_at TIMESTAMP DEFAULT NOW(),
-                confirmed_at TIMESTAMP
+                status VARCHAR(20) DEFAULT 'auto_confirmed',
+                created_at TIMESTAMP DEFAULT NOW()
             )
         """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS bot_broadcasts (
                 id SERIAL PRIMARY KEY,
-                admin_id BIGINT,
-                message_text TEXT,
-                total INT DEFAULT 0,
-                success INT DEFAULT 0,
-                fail INT DEFAULT 0,
+                admin_id BIGINT, message_text TEXT,
+                total INT DEFAULT 0, success INT DEFAULT 0, fail INT DEFAULT 0,
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
@@ -63,63 +56,35 @@ async def get_or_create_user(tg_id, username=None, first_name=None):
             code = gen_code()
             while await conn.fetchval("SELECT 1 FROM bot_users WHERE payment_code=$1", code):
                 code = gen_code()
-            await conn.execute(
-                "INSERT INTO bot_users(telegram_id,username,first_name,payment_code) VALUES($1,$2,$3,$4)",
-                tg_id, username, first_name, code
-            )
+            await conn.execute("INSERT INTO bot_users(telegram_id,username,first_name,payment_code) VALUES($1,$2,$3,$4)", tg_id, username, first_name, code)
             user = await conn.fetchrow("SELECT * FROM bot_users WHERE telegram_id=$1", tg_id)
         else:
             await conn.execute("UPDATE bot_users SET username=$1,first_name=$2 WHERE telegram_id=$3", username, first_name, tg_id)
         return user
-
-async def register_site(tg_id, login, password_hash, site_user_id):
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("UPDATE bot_users SET site_login=$1, site_user_id=$2 WHERE telegram_id=$3", login, site_user_id, tg_id)
-
-async def get_user_by_code(code):
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        return await conn.fetchrow("SELECT * FROM bot_users WHERE payment_code=$1", code)
 
 async def get_user_by_tg(tg_id):
     pool = await get_pool()
     async with pool.acquire() as conn:
         return await conn.fetchrow("SELECT * FROM bot_users WHERE telegram_id=$1", tg_id)
 
-async def add_payment(tg_id, code, amount, screenshot_file_id):
+async def save_payment_log(tg_id, code, amount, screenshot_file_id):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        return await conn.fetchrow(
-            "INSERT INTO bot_payments(telegram_id,payment_code,amount,screenshot_file_id) VALUES($1,$2,$3,$4) RETURNING *",
-            tg_id, code, amount, screenshot_file_id
-        )
-
-async def confirm_payment(payment_id, admin_id):
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("UPDATE bot_payments SET status='confirmed',admin_id=$1,confirmed_at=NOW() WHERE id=$2", admin_id, payment_id)
-        return await conn.fetchrow("SELECT * FROM bot_payments WHERE id=$1", payment_id)
-
-async def reject_payment(payment_id, admin_id):
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("UPDATE bot_payments SET status='rejected',admin_id=$1 WHERE id=$2", admin_id, payment_id)
+        await conn.execute("INSERT INTO bot_payment_logs(telegram_id,code,amount,screenshot_file_id) VALUES($1,$2,$3,$4)", tg_id, code, amount, screenshot_file_id)
 
 async def get_user_payments(tg_id):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        return await conn.fetch("SELECT * FROM bot_payments WHERE telegram_id=$1 ORDER BY created_at DESC LIMIT 20", tg_id)
+        return await conn.fetch("SELECT * FROM bot_payment_logs WHERE telegram_id=$1 ORDER BY created_at DESC LIMIT 20", tg_id)
 
 async def get_stats():
     pool = await get_pool()
     async with pool.acquire() as conn:
         users = await conn.fetchval("SELECT COUNT(*) FROM bot_users")
-        payments = await conn.fetchval("SELECT COUNT(*) FROM bot_payments")
-        confirmed = await conn.fetchval("SELECT COUNT(*) FROM bot_payments WHERE status='confirmed'")
-        pending = await conn.fetchval("SELECT COUNT(*) FROM bot_payments WHERE status='pending'")
-        revenue = await conn.fetchval("SELECT COALESCE(SUM(amount),0) FROM bot_payments WHERE status='confirmed'")
-        return {"users":users,"payments":payments,"confirmed":confirmed,"pending":pending,"revenue":revenue}
+        payments = await conn.fetchval("SELECT COUNT(*) FROM bot_payment_logs")
+        paid = await conn.fetchval("SELECT COUNT(*) FROM bot_payment_logs WHERE status='auto_confirmed'")
+        revenue = await conn.fetchval("SELECT COALESCE(SUM(amount),0) FROM bot_payment_logs WHERE status='auto_confirmed'")
+        return {"users":users, "payments":payments, "paid":paid, "revenue":revenue}
 
 async def get_all_user_ids():
     pool = await get_pool()
