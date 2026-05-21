@@ -43,6 +43,17 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS bot_settings (
+                key VARCHAR(100) PRIMARY KEY,
+                value TEXT,
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        # Default karta qo'shish (agar yo'q bo'lsa)
+        exists = await conn.fetchval("SELECT 1 FROM bot_settings WHERE key='payment_card'")
+        if not exists:
+            await conn.execute("INSERT INTO bot_settings(key,value) VALUES('payment_card','{}')") 
     print("DB initialized!")
 
 def gen_code():
@@ -96,3 +107,34 @@ async def save_broadcast(admin_id, text, total, success, fail):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("INSERT INTO bot_broadcasts(admin_id,message_text,total,success,fail) VALUES($1,$2,$3,$4,$5)", admin_id, text, total, success, fail)
+
+
+async def get_setting(key):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT value FROM bot_settings WHERE key=$1", key)
+        return row['value'] if row else None
+
+async def set_setting(key, value):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        exists = await conn.fetchval("SELECT 1 FROM bot_settings WHERE key=$1", key)
+        if exists:
+            await conn.execute("UPDATE bot_settings SET value=$1, updated_at=NOW() WHERE key=$2", value, key)
+        else:
+            await conn.execute("INSERT INTO bot_settings(key,value) VALUES($1,$2)", key, value)
+
+async def get_payment_card():
+    """To'lov kartasini olish"""
+    import json
+    raw = await get_setting('payment_card')
+    if raw:
+        try: return json.loads(raw)
+        except: pass
+    return None
+
+async def set_payment_card(card_number, owner_name, card_type='HUMO'):
+    """To'lov kartasini saqlash"""
+    import json
+    data = json.dumps({"number": card_number, "owner": owner_name, "type": card_type})
+    await set_setting('payment_card', data)
