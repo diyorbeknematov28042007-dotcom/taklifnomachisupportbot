@@ -24,7 +24,8 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 from config import BOT_TOKEN, ADMIN_IDS, SITE_URL, PAYMENT_GROUP_ID, WEBHOOK_SECRET, PORT
 from database import (
     init_db, get_or_create_user, get_user_by_tg, get_user_payments,
-    get_stats, get_all_user_ids, save_broadcast, save_payment_log
+    get_stats, get_all_user_ids, save_broadcast, save_payment_log,
+    get_payment_card, set_payment_card
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -68,6 +69,11 @@ class Pay(StatesGroup):
 class Broadcast(StatesGroup):
     text = State()
 
+class CardSetup(StatesGroup):
+    number = State()
+    owner = State()
+    card_type = State()
+
 
 def is_admin(uid): return uid in ADMIN_IDS
 
@@ -104,11 +110,18 @@ async def cmd_start(message: Message, state: FSMContext):
                 try: inv_data = json.loads(inv_data)
                 except: inv_data = {}
 
+            card = await get_payment_card()
+            card_info = ""
+            if card:
+                fmt = card['number'].replace(' ','')
+                fmt = ' '.join([fmt[i:i+4] for i in range(0, len(fmt), 4)])
+                card_info = f"\n💳 Karta: <code>{fmt}</code>\n👤 {card['owner']} ({card.get('type','HUMO')})\n"
             text = (
                 f"💳 <b>To'lov ma'lumotlari</b>\n\n"
                 f"📌 Tur: {cat_names.get(pay['category'], pay['category'])}\n"
                 f"💰 Summa: <b>{pay['amount']:,} so'm</b>\n"
-                f"🔑 Kod: <code>{code}</code>\n\n"
+                f"🔑 Kod: <code>{code}</code>"
+                f"{card_info}\n"
                 f"📸 To'lov qilganingizdan so'ng <b>screenshot</b> yuboring!"
             )
             await message.answer(text, parse_mode="HTML")
@@ -174,12 +187,30 @@ async def process_code(message: Message, state: FSMContext):
 
     cat_names = {'wedding': "💍 To'y", 'birthday': "🎂 Tug'ilgan kun", 'love': "❤️ Dil izhori", 'event': "🎤 Tadbir"}
 
+    # To'lov kartasini olish
+    card = await get_payment_card()
+    card_text = ""
+    if card:
+        fmt_num = card['number'].replace(' ','')
+        fmt_num = ' '.join([fmt_num[i:i+4] for i in range(0, len(fmt_num), 4)])
+        card_text = (
+            f"\n💳 <b>To'lov kartasi:</b>\n"
+            f"┌─────────────────────┐\n"
+            f"│ <code>{fmt_num}</code>\n"
+            f"│ {card['owner']}\n"
+            f"│ {card.get('type','HUMO')}\n"
+            f"└─────────────────────┘\n"
+        )
+    else:
+        card_text = "\n⚠️ Admin hali to'lov kartasini qo'shmagan.\n"
+
     text = (
         f"✅ <b>To'lov topildi!</b>\n\n"
         f"📌 Tur: {cat_names.get(pay['category'], pay['category'])}\n"
         f"📋 Shablon: {pay.get('template_name', '')}\n"
-        f"💰 Summa: <b>{pay['amount']:,} so'm</b>\n\n"
-        f"💳 Quyidagi kartaga to'lov qiling va <b>screenshot</b> yuboring 📸"
+        f"💰 Summa: <b>{pay['amount']:,} so'm</b>\n"
+        f"{card_text}\n"
+        f"To'lov qilganingizdan so'ng <b>screenshot</b> yuboring 📸"
     )
     await message.answer(text, parse_mode="HTML")
     await state.update_data(pay_code=code, amount=pay['amount'])
@@ -338,11 +369,14 @@ async def go_site(message: Message):
 async def cmd_admin(message: Message):
     if not is_admin(message.from_user.id):
         await message.answer("❌ Ruxsat yo'q!"); return
+    card = await get_payment_card()
+    card_info = f"💳 Karta: {card['number'][-4:]}****" if card else "⚠️ Karta qo'shilmagan"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Statistika", callback_data="adm_stats")],
+        [InlineKeyboardButton(text="💳 To'lov kartasi", callback_data="adm_card")],
         [InlineKeyboardButton(text="📨 Ommaviy xabar", callback_data="adm_broadcast")],
     ])
-    await message.answer("🛠 <b>Admin paneli</b>", parse_mode="HTML", reply_markup=kb)
+    await message.answer(f"🛠 <b>Admin paneli</b>\n\n{card_info}", parse_mode="HTML", reply_markup=kb)
 
 @dp.callback_query(F.data == "adm_stats")
 async def adm_stats(cb: CallbackQuery):
@@ -356,6 +390,93 @@ async def adm_stats(cb: CallbackQuery):
         f"💰 Daromad: {s['revenue']:,} so'm"
     )
     await cb.message.answer(text, parse_mode="HTML")
+    await cb.answer()
+
+
+@dp.callback_query(F.data == "adm_card")
+async def adm_card(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id): return
+    card = await get_payment_card()
+    if card:
+        fmt = card['number'].replace(' ','')
+        fmt = ' '.join([fmt[i:i+4] for i in range(0, len(fmt), 4)])
+        text = (
+            f"💳 <b>Hozirgi to'lov kartasi:</b>\n\n"
+            f"Raqam: <code>{fmt}</code>\n"
+            f"Egasi: {card['owner']}\n"
+            f"Turi: {card.get('type','HUMO')}\n\n"
+            f"O'zgartirish uchun tugmani bosing:"
+        )
+    else:
+        text = "⚠️ To'lov kartasi hali qo'shilmagan.\nYangi karta qo'shish uchun tugmani bosing:"
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Yangi karta qo'shish", callback_data="adm_card_new")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="adm_back")],
+    ])
+    await cb.message.answer(text, parse_mode="HTML", reply_markup=kb)
+    await cb.answer()
+
+@dp.callback_query(F.data == "adm_card_new")
+async def adm_card_new(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id): return
+    await cb.message.answer("💳 Karta raqamini kiriting:\n\n<i>Masalan: 8600 1234 5678 9012</i>", parse_mode="HTML")
+    await state.set_state(CardSetup.number)
+    await cb.answer()
+
+@dp.message(CardSetup.number)
+async def card_number_input(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await state.clear(); return
+    num = message.text.strip().replace(' ','').replace('-','')
+    if not num.isdigit() or len(num) < 16:
+        await message.answer("⚠️ Karta raqami 16 ta raqamdan iborat bo'lishi kerak. Qayta kiriting:")
+        return
+    await state.update_data(card_number=num)
+    await message.answer("👤 Karta egasi ismini kiriting:\n\n<i>Masalan: DIYORBEK NEMATOV</i>", parse_mode="HTML")
+    await state.set_state(CardSetup.owner)
+
+@dp.message(CardSetup.owner)
+async def card_owner_input(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await state.clear(); return
+    owner = message.text.strip().upper()
+    await state.update_data(card_owner=owner)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="HUMO", callback_data="ctype_HUMO"),
+         InlineKeyboardButton(text="UzCard", callback_data="ctype_UZCARD")],
+        [InlineKeyboardButton(text="Visa", callback_data="ctype_VISA"),
+         InlineKeyboardButton(text="MasterCard", callback_data="ctype_MC")],
+    ])
+    await message.answer("💳 Karta turini tanlang:", reply_markup=kb)
+    await state.set_state(CardSetup.card_type)
+
+@dp.callback_query(F.data.startswith("ctype_"), CardSetup.card_type)
+async def card_type_select(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id): return
+    card_type = cb.data.replace("ctype_", "")
+    data = await state.get_data()
+    num = data.get('card_number','')
+    owner = data.get('card_owner','')
+    
+    await set_payment_card(num, owner, card_type)
+    await state.clear()
+    
+    fmt = ' '.join([num[i:i+4] for i in range(0, len(num), 4)])
+    await cb.message.answer(
+        f"✅ <b>Karta saqlandi!</b>\n\n"
+        f"💳 Raqam: <code>{fmt}</code>\n"
+        f"👤 Egasi: {owner}\n"
+        f"📇 Turi: {card_type}\n\n"
+        f"Endi foydalanuvchilar to'lov qilganda shu karta ko'rinadi.",
+        parse_mode="HTML"
+    )
+    await cb.answer("✅ Saqlandi!")
+
+@dp.callback_query(F.data == "adm_back")
+async def adm_back(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id): return
+    await cmd_admin(cb.message)
     await cb.answer()
 
 @dp.callback_query(F.data == "adm_broadcast")
