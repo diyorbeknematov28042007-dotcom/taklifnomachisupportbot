@@ -235,20 +235,15 @@ async def process_screenshot(message: Message, state: FSMContext):
     result = await api_verify_payment(code, message.from_user.id)
 
     if result and result.get('success'):
-        link = result.get('link', '')
-
-        # Foydalanuvchiga xabar
+        # Foydalanuvchiga xabar — to'lov tasdiqlandi, endi saytda domen tanlaydi
         text = (
             f"✅ <b>To'lovingiz tasdiqlandi!</b>\n\n"
             f"💰 Summa: {amount:,} so'm\n"
             f"🔑 Kodingiz: <code>{code}</code>\n"
             f"<i>(bu kod sizning doimiy raqamingiz — saqlang!)</i>\n\n"
-        )
-        if link:
-            text += f"🔗 Taklifnoma linkingiz:\n{link}\n\n"
-        text += (
-            f"📱 Saytni yangilang va linkingizni do'stlaringizga ulashing!\n\n"
-            f"<i>Profilingizda barcha taklifnomalaringiz ko'rinadi</i>"
+            f"🌐 <b>Endi saytga o'ting va o'zingizga maxsus domen nom tanlang!</b>\n\n"
+            f"Masalan: <i>ali-zarina</i>, <i>mylove</i>, <i>wedding2026</i>\n\n"
+            f"📱 Saytda profilingizni oching va taklifnomangiz uchun domen belgilang."
         )
 
         await message.answer(text, parse_mode="HTML", reply_markup=site_btn())
